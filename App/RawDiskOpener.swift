@@ -48,10 +48,10 @@ enum RawDiskOpener {
                     guard r >= 0, msg.msg_controllen >= socklen_t(MemoryLayout<cmsghdr>.size) else { return nil }
                     let h = cb.baseAddress!.load(as: cmsghdr.self)
                     let minLen = socklen_t(MemoryLayout<cmsghdr>.size + MemoryLayout<Int32>.size)   // CMSG_LEN(4)
-                    guard h.cmsg_level == SOL_SOCKET, h.cmsg_type == SCM_RIGHTS else { return nil }
-                    // CMSG_DATA: tepat setelah header (12 byte, sudah selaras 4)
+                    guard h.cmsg_level == SOL_SOCKET, h.cmsg_type == SCM_RIGHTS, h.cmsg_len >= minLen else { return nil }
+                    // CMSG_DATA: tepat setelah header (12 byte, sudah selaras 4); hanya dibaca setelah divalidasi
                     let fd = cb.baseAddress!.loadUnaligned(fromByteOffset: MemoryLayout<cmsghdr>.size, as: Int32.self)
-                    if msg.msg_flags & MSG_CTRUNC != 0 || h.cmsg_len < minLen { Darwin.close(fd); return nil }
+                    if msg.msg_flags & MSG_CTRUNC != 0 { Darwin.close(fd); return nil }
                     return fd
                 }
             }
