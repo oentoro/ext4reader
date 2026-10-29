@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import Ext4Kit
 
 enum Fixtures {
     static let root = URL(fileURLWithPath: #filePath)
@@ -58,4 +59,11 @@ func shell(_ cmd: String) -> Int32 {
     p.arguments = ["-c", cmd]
     try! p.run(); p.waitUntilExit()
     return p.terminationStatus
+}
+
+/// Selection that has each given path checked (`set(p, true)`).
+func sel(_ paths: String...) -> Selection {
+    var s = Selection()
+    for p in paths { s.set(p, true) }
+    return s
 }
