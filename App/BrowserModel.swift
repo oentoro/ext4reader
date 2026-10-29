@@ -22,7 +22,7 @@ import Ext4Kit
         }
     }
     var totals: (files: Int, bytes: UInt64)?      // nil = "menghitung…"
-    var immichSuggestion: String?                 // alert saran akar
+    var immichSuggestion: (sourceID: String, path: String)?                 // alert saran akar
     var pendingRoot: String?                      // alert peringatan ganti akar (spec §6a)
     var errorMessage: String?
 
@@ -39,18 +39,23 @@ import Ext4Kit
     }
 
     func addOpened(fd: Int32, id: String, title: String) async {
-        await register(id: id, title: title) { () throws(Ext4Error) -> Volume in try Volume.open(fd: fd) }
+        await register(id: id, title: title, fd: fd) { () throws(Ext4Error) -> Volume in try Volume.open(fd: fd) }
     }
 
-    private func register(id: String, title: String,
+    private func register(id: String, title: String, fd: Int32? = nil,
                           _ make: @escaping @LwExt4 @Sendable () throws(Ext4Error) -> Volume) async {
-        if sources.contains(where: { $0.id == id }) { selectedSourceID = id; return }
+        if sources.contains(where: { $0.id == id }) {
+            if let fd { Darwin.close(fd) }   // fd baru tidak dipakai
+            selectedSourceID = id; return
+        }
         let r = await Self.open(make)
         switch r {
         case .success(let (vol, uuid, clean)):
             sources.append(Source(id: id, title: title, status: clean ? .readOnly : .notClean, volume: vol, uuid: uuid))
             selectedSourceID = id
-            if settings.backupRoot == nil, let s = await Self.suggest(vol) { immichSuggestion = s }
+            if settings.backupRoot == nil, let p = await Self.suggest(vol), selectedSourceID == id {
+                immichSuggestion = (id, p)
+            }
         case .failure(let e):
             sources.append(Source(id: id, title: title, status: .unsupported(e.localizedDescription)))
             selectedSourceID = id
@@ -86,7 +91,7 @@ import Ext4Kit
         for v in vols { await Self.close(v) }
     }
 
-    @LwExt4 private static func close(_ v: Volume) { v.close() }
+    @LwExt4 static func close(_ v: Volume) { v.close() }
 
     // MARK: - Pohon
 

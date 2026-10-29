@@ -10,7 +10,8 @@ import SwiftUI
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
                     // Tutup volume sebelum keluar; tunggu singkat agar umount selesai.
                     let done = DispatchSemaphore(value: 0)
-                    Task { await model.closeAll(); done.signal() }
+                    let vols = model.sources.compactMap(\.volume)
+                    Task.detached { for v in vols { await BrowserModel.close(v) }; done.signal() }
                     _ = done.wait(timeout: .now() + 2)
                 }
         }
@@ -36,9 +37,9 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .alert("Ini terlihat seperti library Immich. Jadikan \(model.immichSuggestion ?? "") akar backup?",
+        .alert("Ini terlihat seperti library Immich. Jadikan \(model.immichSuggestion?.path ?? "") akar backup?",
                isPresented: Binding(get: { model.immichSuggestion != nil }, set: { if !$0 { model.immichSuggestion = nil } })) {
-            Button("Ya") { if let p = model.immichSuggestion { model.setBackupRoot(p) }; model.immichSuggestion = nil }
+            Button("Ya") { if let s = model.immichSuggestion, s.sourceID == model.selectedSourceID { model.setBackupRoot(s.path) }; model.immichSuggestion = nil }
             Button("Tidak", role: .cancel) { model.immichSuggestion = nil }
         }
         .alert("Ganti akar backup?",
