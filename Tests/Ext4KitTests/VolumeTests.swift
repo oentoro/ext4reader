@@ -29,6 +29,14 @@ import Foundation
         #expect(throws: Ext4Error.unsupported("nama bukan UTF-8 valid")) { try v.read(bad.path) { _ in } }
         #expect(es.filter(\.hasValidName).count == es.count - 1)
     }
+    @Test @LwExt4 func validNameContainingReplacementCharIsReadable() throws {
+        let v = try Volume.openImage(Fixtures.trixie); defer { v.close() }
+        let e = try #require(try v.list("/names").first { $0.name == "x\u{FFFD}.txt" })
+        #expect(e.hasValidName)
+        #expect(try v.entry(e.path).hasValidName)
+        var data = Data(); try v.read(e.path) { data.append(contentsOf: $0) }
+        #expect(data == Data("replacement-char\n".utf8))
+    }
     @Test @LwExt4 func listsTwentyThousandEntriesFast() throws {
         let v = try Volume.openImage(Fixtures.trixie); defer { v.close() }
         let t = ContinuousClock.now; let es = try v.list("/bigdir")

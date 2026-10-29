@@ -87,7 +87,9 @@ public struct Entry: Hashable, Sendable {
                 ext4_raw_inode_fill($0, &ino, &inode)
             }
         }
-        if rc == ENOENT { throw .notFound(fsPath) }
+        if rc == ENOENT {
+            throw fsPath.contains("\u{FFFD}") ? .unsupported("nama bukan UTF-8 valid") : .notFound(fsPath)
+        }
         if rc != EOK { throw .io(rc) }
         return try entry(from: &inode, name: name, valid: valid, fsPath: fsPath)
     }
@@ -105,7 +107,7 @@ public struct Entry: Hashable, Sendable {
 
     public func entry(_ path: String) throws(Ext4Error) -> Entry {
         let name = path == "/" ? "/" : String(path.split(separator: "/").last ?? "")
-        return try makeEntry(name: name, valid: !path.contains("\u{FFFD}"),
+        return try makeEntry(name: name, valid: true,
                              fsPath: path, cPath: Array(cpath(path).utf8) + [0])
     }
 
@@ -136,10 +138,11 @@ public struct Entry: Hashable, Sendable {
 
     /// Potongan 1 MiB. Gagal baca/buka lwext4 -> `Ext4Error.io(rc)` (untuk deteksi disk dicabut).
     public func read(_ path: String, _ body: (UnsafeRawBufferPointer) throws -> Void) throws {
-        if path.contains("\u{FFFD}") { throw Ext4Error.unsupported("nama bukan UTF-8 valid") }
         var f = ext4_file()
         var rc = ext4_fopen(&f, cpath(path), "rb")
-        if rc == ENOENT { throw Ext4Error.notFound(path) }
+        if rc == ENOENT {
+            throw path.contains("\u{FFFD}") ? Ext4Error.unsupported("nama bukan UTF-8 valid") : Ext4Error.notFound(path)
+        }
         if rc != EOK { throw Ext4Error.io(rc) }
         defer { ext4_fclose(&f) }
         let chunk = 1 << 20

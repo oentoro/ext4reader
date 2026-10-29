@@ -20,6 +20,7 @@ truncate -s 5G $S/big/huge.bin
 ( cd $S/bigdir && seq -f 'f%05g' 0 19999 | xargs touch )
 printf 'nfc\n' > "$S/names/café.txt"
 ln -s ../names $S/links/l
+printf 'replacement-char\n' > "$S/names/x$(printf '\xef\xbf\xbd').txt"  # valid UTF-8 name containing U+FFFD
 
 truncate -s 512M $B/trixie.img
 "$E2/sbin/mkfs.ext4" -q -F -b 4096 -I 256 -N 40000 \
