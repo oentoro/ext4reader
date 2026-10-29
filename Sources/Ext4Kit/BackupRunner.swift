@@ -64,10 +64,14 @@ private struct WriteFailure: Error { let errno: Int32 }
         case .copy(let to): rel = to; isConflict = false
         case .conflict(let to): rel = to; isConflict = true
         }
+        var rootIsDir: ObjCBool = false
+        guard fm.fileExists(atPath: destination.path, isDirectory: &rootIsDir), rootIsDir.boolValue else {
+            report.stopReason = .destinationMissing; return report   // jangan pernah membuat ulang folder tujuan
+        }
         if isCancelled() { report.stopReason = .cancelled; return report }
 
         let final = destination.appending(path: rel)
-        let partial = final.deletingLastPathComponent().appending(path: "." + final.lastPathComponent + ".partial")
+        var partial = final   // diganti dengan nama partial unik yang kita buat sendiri
         func emit() {
             progress(BackupProgress(filesDone: filesDone, filesTotal: todo.count,
                                     bytesDone: bytesDone, bytesTotal: total, currentPath: item.relativePath))
@@ -82,11 +86,17 @@ private struct WriteFailure: Error { let errno: Int32 }
             }
             report.failures.append((item.relativePath, "gagal membuat folder: \(error.localizedDescription)")); continue
         }
-        let fd = open(partial.path, O_WRONLY | O_CREAT | O_TRUNC, 0o644)
+        // Nama acak + O_EXCL|O_NOFOLLOW: tidak pernah menyentuh/menghapus file yang bukan buatan kita.
+        var fd: Int32 = -1, openErr: Int32 = EEXIST
+        for _ in 0..<5 where fd < 0 && openErr == EEXIST {
+            let hex = String(format: "%08x", UInt32.random(in: .min ... .max))
+            partial = final.deletingLastPathComponent().appending(path: "." + final.lastPathComponent + ".\(hex).partial")
+            fd = open(partial.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o644)
+            if fd < 0 { openErr = errno }
+        }
         if fd < 0 {
-            let e = errno
-            if e == ENOSPC { report.stopReason = .destinationFull; return report }
-            report.failures.append((item.relativePath, String(cString: strerror(e)))); continue
+            if openErr == ENOSPC { report.stopReason = .destinationFull; return report }
+            report.failures.append((item.relativePath, String(cString: strerror(openErr)))); continue
         }
         var fileBytes: UInt64 = 0
         var cancelled = false
@@ -122,8 +132,15 @@ private struct WriteFailure: Error { let errno: Int32 }
             report.failures.append((item.relativePath, "\(error)")); continue
         }
         badReads = 0
-        if close(fd) != 0 {
+        var syncErr: Int32 = 0
+        if fcntl(fd, F_FULLFSYNC) != 0 {
             let e = errno
+            if (e == ENOTSUP || e == EINVAL) && fsync(fd) != 0 { syncErr = errno }
+            else if e != ENOTSUP && e != EINVAL { syncErr = e }
+        }
+        if close(fd) != 0 && syncErr == 0 { syncErr = errno }
+        if syncErr != 0 {
+            let e = syncErr
             unlink(partial.path)
             if e == ENOSPC { report.stopReason = .destinationFull; return report }
             report.failures.append((item.relativePath, String(cString: strerror(e)))); continue

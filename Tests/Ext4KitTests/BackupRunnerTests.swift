@@ -42,6 +42,45 @@ import Foundation
         #expect(sha256(two) == sha256(Fixtures.srcTree.appending(path: "immich/library/library/" + rel)))
     }
 
+    @Test @LwExt4 func preexistingPartialsAreNeverTouched() throws {
+        let v = try Volume.openImage(Fixtures.trixie); defer { v.close() }
+        let tmp = tmpDir()
+        let dir = tmp.appending(path: "admin/2026/07")
+        let d1 = dir.appending(path: "01"), d2 = dir.appending(path: "02")
+        try FileManager.default.createDirectory(at: d1, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: d2, withIntermediateDirectories: true)
+        let reg = d1.appending(path: ".IMG_0001.heic.partial")
+        try Data("milik-user".utf8).write(to: reg)
+        let victim = tmp.appending(path: "victim.txt")
+        try Data("jangan-sentuh".utf8).write(to: victim)
+        let link = d2.appending(path: ".IMG_0002.heic.partial")
+        try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: victim.path)
+        let plan = try makePlan(v, root: Self.lib, selection: sel("admin/2026/07"), destination: tmp)
+        let r = runBackup(plan, volume: v, destination: tmp, progress: { _ in }, isCancelled: { false })
+        #expect(r.failures.isEmpty && r.copied.count == 2)
+        #expect(try Data(contentsOf: reg) == Data("milik-user".utf8))
+        #expect(try Data(contentsOf: victim) == Data("jangan-sentuh".utf8))
+        #expect(try FileManager.default.destinationOfSymbolicLink(atPath: link.path) == victim.path)
+        for n in ["01/IMG_0001", "02/IMG_0002"] {
+            #expect(sha256(dir.appending(path: n + ".heic")) == sha256(Fixtures.srcTree.appending(path: "immich/library/library/admin/2026/07/" + n + ".heic")))
+        }
+        #expect(partials(in: tmp).sorted() == ["admin/2026/07/01/.IMG_0001.heic.partial", "admin/2026/07/02/.IMG_0002.heic.partial"])
+    }
+
+    @Test @LwExt4 func destinationRemovedMidRunStopsWithoutRecreating() throws {
+        let v = try Volume.openImage(Fixtures.trixie); defer { v.close() }
+        let parent = tmpDir()
+        let dest = parent.appending(path: "dest")
+        try FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
+        let plan = try makePlan(v, root: Self.lib, selection: sel("admin"), destination: dest)
+        var moved = false
+        let r = runBackup(plan, volume: v, destination: dest, progress: {
+            if $0.filesDone == 1 && !moved { moved = true; try? FileManager.default.moveItem(at: dest, to: parent.appending(path: "away")) }
+        }, isCancelled: { false })
+        #expect(r.stopReason == .destinationMissing)
+        #expect(!FileManager.default.fileExists(atPath: dest.path))
+    }
+
     @Test @LwExt4 func cancelLeavesNoPartial() throws {
         let v = try Volume.openImage(Fixtures.trixie); defer { v.close() }
         let tmp = tmpDir()
@@ -65,6 +104,8 @@ import Foundation
             if $0.filesDone == 1 && !cut { cut = true; truncate(copy.path, 0) }
         }, isCancelled: { false })
         #expect(r.stopReason == .diskDisconnected)
+        #expect(r.copied.count == 1)
+        #expect(r.failures.count >= 1 && r.failures.allSatisfy { $0.message.contains("membaca") })
         #expect(partials(in: tmp).isEmpty)
     }
 
