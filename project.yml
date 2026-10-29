@@ -1,0 +1,33 @@
+name: Ext4Reader
+options:
+  deploymentTarget:
+    macOS: "14.0"
+packages:
+  Ext4Kit:
+    path: .
+targets:
+  Ext4Reader:
+    type: application
+    platform: macOS
+    sources: [App]
+    dependencies:
+      - package: Ext4Kit
+        product: Ext4Kit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.oentoro.Ext4Reader
+        ENABLE_APP_SANDBOX: NO
+        ARCHS: $(ARCHS_STANDARD)
+        SWIFT_VERSION: "6.0"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Ext4 Reader
+        INFOPLIST_KEY_NSHumanReadableCopyright: ""
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "-"
+schemes:
+  Ext4Reader:
+    build:
+      targets:
+        Ext4Reader: all
+    run:
+      config: Debug
