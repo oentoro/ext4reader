@@ -45,7 +45,10 @@ public struct BackupPlan: Sendable {
     func walk(_ dir: String, _ rel: String) throws {
         for e in try v.list(dir) {
             let childRel = rel.isEmpty ? e.name : rel + "/" + e.name
-            if e.kind == .directory {
+            if e.kind == .directory && !e.hasValidName {
+                // path lossy: tidak bisa ditelusuri; dilaporkan sebagai item gagal
+                if selection.isSelected(childRel) || selection.state(of: childRel) == .mixed { try visit(e, childRel) }
+            } else if e.kind == .directory {
                 if selection.isSelected(childRel) || selection.state(of: childRel) == .mixed {
                     try walk(e.path, childRel)
                 }
@@ -58,7 +61,7 @@ public struct BackupPlan: Sendable {
     var missing: [String] = []
     for p in selection.included.sorted() where !p.isEmpty {
         do { _ = try v.entry(root == "/" ? "/" + p : root + "/" + p) }
-        catch Ext4Error.notFound { missing.append(p) }
+        catch { missing.append(p) }   // notFound / unsupported / io(ENOTDIR): tidak ada lagi
     }
     return missing
 }
@@ -80,6 +83,7 @@ public struct BackupPlan: Sendable {
     func matches(_ rel: String, _ e: Entry) -> Bool? {   // nil = tidak ada di disk
         guard let a = try? FileManager.default.attributesOfItem(atPath: destination.appending(path: rel).path)
         else { return nil }
+        guard a[.type] as? FileAttributeType == .typeRegular else { return false }   // ada tapi beda jenis
         let size = (a[.size] as? NSNumber)?.uint64Value
         let m = a[.modificationDate] as? Date
         return size == e.size && m.map { abs($0.timeIntervalSince(e.mtime)) <= 2 } == true
@@ -92,6 +96,14 @@ public struct BackupPlan: Sendable {
         default: break
         }
         if !e.hasValidName { return .fail("nama bukan UTF-8 valid") }
+        var anc = destination
+        for c in rel.split(separator: "/").dropLast() {
+            anc = anc.appending(path: String(c))
+            var d: ObjCBool = false
+            if FileManager.default.fileExists(atPath: anc.path, isDirectory: &d) {
+                if !d.boolValue { return .fail("tujuan bukan folder") }
+            } else { break }
+        }
         let dot = e.name.lastIndex(of: ".").flatMap { $0 > e.name.startIndex ? $0 : nil }
         let stem = dot.map { String(e.name[..<$0]) } ?? e.name
         let ext = dot.map { String(e.name[$0...]) } ?? ""

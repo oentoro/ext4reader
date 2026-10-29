@@ -49,7 +49,32 @@ import Foundation
     @Test @LwExt4 func unicodeNormalizationCollision() throws {
         let v = try Volume.openImage(Fixtures.trixie); defer { v.close() }
         let p = try makePlan(v, root: "/names", selection: sel(""), destination: tmpDir())
-        #expect(p.items.filter { $0.relativePath.lowercased().hasPrefix("caf") }.map(\.action).contains(.conflict(to: "café (2).txt")))
+        let caf = p.items.filter { $0.relativePath.lowercased().hasPrefix("caf") }
+        #expect(caf.count == 2)
+        let copies = caf.compactMap { if case .copy(let t) = $0.action { t } else { nil } }
+        let confl = caf.compactMap { if case .conflict(let t) = $0.action { t } else { nil } }
+        #expect(copies.count == 1 && confl.count == 1)
+        #expect(confl.first.map { Array($0.unicodeScalars) == Array("caf\u{E9} (2).txt".unicodeScalars) } == true)
+    }
+    @Test @LwExt4 func invalidNamedDirectoryFailsPerItem() throws {
+        let v = try Volume.openImage(Fixtures.trixie); defer { v.close() }
+        let p = try makePlan(v, root: "/baddirs", selection: sel(""), destination: tmpDir())
+        #expect(p.items.map(\.action) == [.fail("nama bukan UTF-8 valid")])
+    }
+    @Test @LwExt4 func directoryAtFilePathIsNotSkipped() throws {
+        let v = try Volume.openImage(Fixtures.trixie); defer { v.close() }
+        let t = tmpDir()
+        try FileManager.default.createDirectory(at: t.appending(path: Self.f1), withIntermediateDirectories: true)
+        let p = try makePlan(v, root: Self.lib, selection: sel("admin/2026/07/01"), destination: t)
+        #expect(p.items.map(\.action) == [.conflict(to: "admin/2026/07/01/IMG_0001 (2).heic")])
+    }
+    @Test @LwExt4 func fileWhereFolderShouldBeFails() throws {
+        let v = try Volume.openImage(Fixtures.trixie); defer { v.close() }
+        let t = tmpDir()
+        try FileManager.default.createDirectory(at: t.appending(path: "admin/2026"), withIntermediateDirectories: true)
+        try Data([1]).write(to: t.appending(path: "admin/2026/07"))
+        let p = try makePlan(v, root: Self.lib, selection: sel("admin/2026/07"), destination: t)
+        #expect(p.items.count == 2 && p.items.allSatisfy { $0.action == .fail("tujuan bukan folder") })
     }
     @Test @LwExt4 func symlinkAndBadNameFail() throws {
         let v = try Volume.openImage(Fixtures.trixie); defer { v.close() }

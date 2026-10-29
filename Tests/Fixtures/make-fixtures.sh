@@ -15,7 +15,7 @@ for p in 2026/07/01/IMG_0001 2026/07/02/IMG_0002 2026/08/01/IMG_5772; do
   mkdir -p "$L/library/admin/$(dirname $p)"
   head -c 102400 /dev/urandom > "$L/library/admin/$p.heic"
 done
-mkdir -p $S/big $S/bigdir $S/names $S/links
+mkdir -p $S/big $S/bigdir $S/names $S/links $S/baddirs
 truncate -s 5G $S/big/huge.bin
 ( cd $S/bigdir && seq -f 'f%05g' 0 19999 | xargs touch )
 printf 'nfc\n' > "$S/names/café.txt"
@@ -34,6 +34,8 @@ write $B/up.tmp names/A.jpg
 write $B/low.tmp names/a.jpg
 write $B/nfd.txt names/cafe$(printf '\xcc\x81').txt
 write $B/bad.txt names/bad$(printf '\xff').txt
+mkdir baddirs/dir$(printf '\xff')
+write $B/bad.txt baddirs/dir$(printf '\xff')/inner.txt
 CMD
 "$E2/sbin/debugfs" -w -f $B/cmds $B/trixie.img >/dev/null
 rm $B/cmds $B/up.tmp $B/low.tmp $B/nfd.txt $B/bad.txt
