@@ -125,6 +125,71 @@ import Foundation
         #expect(partials(in: mnt).isEmpty)
     }
 
+    @Test @LwExt4 func bytesDoneNeverDecreasesWhenFileFailsMidCopy() throws {
+        let copy = tmpDir().appending(path: "copy.img")
+        try FileManager.default.copyItem(at: Fixtures.trixie, to: copy)
+        let v = try Volume.openImage(copy); defer { v.close() }
+        let tmp = tmpDir()
+        let plan = try makePlan(v, root: "/", selection: sel("media"), destination: tmp)
+        #expect(plan.items.map(\.relativePath) == ["media/big-odd.bin", "media/frag.bin"])
+        var seen: [UInt64] = []
+        var cut = false, restored = false
+        let r = runBackup(plan, volume: v, destination: tmp, progress: {
+            seen.append($0.bytesDone)
+            // potong image di tengah big-odd.bin (setelah potongan pertama)
+            if $0.filesDone == 0 && $0.bytesDone > 0 && !cut { cut = true; truncate(copy.path, 0) }
+        }, isCancelled: {
+            // dipanggil di awal file berikutnya: kembalikan isi image (inode sama) agar frag.bin terbaca
+            if cut && !restored { restored = true; shell("cat '\(Fixtures.trixie.path)' > '\(copy.path)'") }
+            return false
+        })
+        #expect(cut && restored)
+        #expect(r.failures.map(\.path) == ["media/big-odd.bin"] && r.copied == ["media/frag.bin"])
+        #expect(seen.count >= 2 && zip(seen, seen.dropFirst()).allSatisfy { $0 <= $1 })
+        #expect(seen.last == plan.bytesToCopy)
+        #expect(partials(in: tmp).isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: tmp.appending(path: "media/big-odd.bin").path))
+    }
+
+    @Test @LwExt4 func closedVolumeStopsWithoutCreatingFolders() throws {
+        let v = try Volume.openImage(Fixtures.trixie)
+        let tmp = tmpDir()
+        let plan = try makePlan(v, root: Self.lib, selection: sel("admin"), destination: tmp)
+        v.close()
+        let r = runBackup(plan, volume: v, destination: tmp, progress: { _ in }, isCancelled: { false })
+        #expect(r.stopReason == .diskDisconnected)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: tmp.path).isEmpty)
+    }
+
+    @Test @LwExt4 func exfatDestinationRoundTrips() throws {
+        let v = try Volume.openImage(Fixtures.trixie); defer { v.close() }
+        let work = tmpDir()
+        let img = work.appending(path: "x.dmg")
+        let mnt = work.appending(path: "mnt")
+        try FileManager.default.createDirectory(at: mnt, withIntermediateDirectories: true)
+        #expect(shell("hdiutil create -size 20m -fs ExFAT -volname X '\(img.path)' >/dev/null 2>&1") == 0)
+        #expect(shell("hdiutil attach -nobrowse -mountpoint '\(mnt.path)' '\(img.path)' >/dev/null 2>&1") == 0)
+        defer { shell("hdiutil detach -force '\(mnt.path)' >/dev/null 2>&1") }
+        let plan = try makePlan(v, root: Self.lib, selection: sel("admin"), destination: mnt)
+        #expect(plan.availableBytes > 0 && plan.hasEnoughSpace)
+        let r = runBackup(plan, volume: v, destination: mnt, progress: { _ in }, isCancelled: { false })
+        #expect(r.failures.isEmpty && r.stopReason == nil && r.copied.count == 3)
+        for rel in r.copied {
+            #expect(sha256(mnt.appending(path: rel)) == sha256(Fixtures.srcTree.appending(path: "immich/library/library/" + rel)))
+        }
+        let again = try makePlan(v, root: Self.lib, selection: sel("admin"), destination: mnt)
+        #expect(again.counts.copy == 0 && again.counts.conflict == 0)
+        #expect(partials(in: mnt).isEmpty)
+    }
+
+    @Test func renameExclusiveNeverOverwrites() throws {
+        let d = tmpDir()
+        let a = d.appending(path: "a"), b = d.appending(path: "b")
+        try Data("a".utf8).write(to: a); try Data("b".utf8).write(to: b)
+        #expect(renameExclusive(a.path, b.path) == EEXIST)
+        #expect(try Data(contentsOf: b) == Data("b".utf8))
+    }
+
     @Test func reportTextListsSections() {
         var r = BackupReport()
         r.stopReason = .diskDisconnected

@@ -35,6 +35,7 @@ public struct Superblock: Sendable, Equatable {
 
     /// Baca 4096 byte dari offset 0 (aman untuk alignment rdisk).
     public static func read(fd: Int32, sectorSize: Int) throws(Ext4Error) -> Superblock {
+        guard sectorSize > 0 else { throw .io(EINVAL) }
         let len = max(4096, (4096 + sectorSize - 1) / sectorSize * sectorSize)
         let buf = UnsafeMutableRawBufferPointer.allocate(byteCount: len, alignment: 4096)
         defer { buf.deallocate() }

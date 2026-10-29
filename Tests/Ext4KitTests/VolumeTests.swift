@@ -52,6 +52,26 @@ import Foundation
         let b = try Volume.openImage(Fixtures.dirty); defer { b.close() }
         #expect(!(try a.list("/")).isEmpty); #expect(!(try b.list("/")).isEmpty)
     }
+    @Test @LwExt4 func mediaFilesReadByteIdentical() throws {
+        let v = try Volume.openImage(Fixtures.trixie); defer { v.close() }
+        for p in ["/media/big-odd.bin", "/media/frag.bin"] {
+            let src = Fixtures.srcTree.appending(path: String(p.dropFirst()))
+            var data = Data(); try v.read(p) { data.append(contentsOf: $0) }
+            #expect(data == (try Data(contentsOf: src)))
+            #expect(try v.entry(p).size == UInt64(data.count))
+        }
+        #expect(try v.entry("/media/big-odd.bin").size == 3_000_001)
+    }
+    @Test @LwExt4 func useAfterCloseThrowsENXIO() throws {
+        let v = try Volume.openImage(Fixtures.trixie)
+        let f = try v.open("/names/A.jpg")
+        v.close()
+        #expect(throws: Ext4Error.io(ENXIO)) { try v.list("/") }
+        #expect(throws: Ext4Error.io(ENXIO)) { try v.entry("/names") }
+        #expect(throws: Ext4Error.io(ENXIO)) { try v.open("/names/A.jpg") }
+        #expect(throws: Ext4Error.io(ENXIO)) { try f.read { _ in } }
+        f.close()
+    }
     @Test @LwExt4 func closeIsIdempotent() throws {
         let v = try Volume.openImage(Fixtures.trixie); v.close(); v.close()
     }

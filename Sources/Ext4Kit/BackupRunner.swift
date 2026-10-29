@@ -69,6 +69,9 @@ private struct WriteFailure: Error { let errno: Int32 }
             report.stopReason = .destinationMissing; return report   // jangan pernah membuat ulang folder tujuan
         }
         if isCancelled() { report.stopReason = .cancelled; return report }
+        // bytesDone hanya naik: file yang gagal tetap dihitung penuh agar progress mencapai 100%.
+        let startBytes = bytesDone
+        defer { bytesDone = max(bytesDone, startBytes + item.size) }
 
         let final = destination.appending(path: rel)
         var partial = final   // diganti dengan nama partial unik yang kita buat sendiri
@@ -77,6 +80,21 @@ private struct WriteFailure: Error { let errno: Int32 }
                                     bytesDone: bytesDone, bytesTotal: total, currentPath: item.relativePath))
         }
         func abort(_ message: String) { unlink(partial.path); report.failures.append((item.relativePath, message)) }
+
+        // Buka sumber dulu: sumber yang mati tidak boleh meninggalkan pohon folder kosong di tujuan.
+        let src: Volume.OpenFile
+        do { src = try volume.open(item.sourcePath) }
+        catch {
+            if case Ext4Error.io(let rc) = error, gone.contains(rc) {
+                badReads += 1
+                report.failures.append((item.relativePath, "gagal membaca dari disk"))
+                if badReads >= 2 { report.stopReason = .diskDisconnected; return report }
+                continue
+            }
+            badReads = 0
+            report.failures.append((item.relativePath, "\(error)")); continue
+        }
+        defer { src.close() }
 
         do { try fm.createDirectory(at: final.deletingLastPathComponent(), withIntermediateDirectories: true) }
         catch {
@@ -98,10 +116,9 @@ private struct WriteFailure: Error { let errno: Int32 }
             if openErr == ENOSPC { report.stopReason = .destinationFull; return report }
             report.failures.append((item.relativePath, String(cString: strerror(openErr)))); continue
         }
-        var fileBytes: UInt64 = 0
         var cancelled = false
         do {
-            try volume.read(item.sourcePath) { chunk in
+            try src.read { chunk in
                 if isCancelled() { cancelled = true; throw Ext4Error.cancelled }
                 var off = 0
                 while off < chunk.count {
@@ -109,13 +126,11 @@ private struct WriteFailure: Error { let errno: Int32 }
                     if n < 0 { if errno == EINTR { continue }; throw WriteFailure(errno: errno) }
                     off += n
                 }
-                fileBytes += UInt64(chunk.count)
                 bytesDone += UInt64(chunk.count)
                 emit()
             }
         } catch {
             close(fd)
-            bytesDone -= fileBytes
             unlink(partial.path)
             if cancelled { report.stopReason = .cancelled; return report }
             if let w = error as? WriteFailure {
@@ -147,8 +162,7 @@ private struct WriteFailure: Error { let errno: Int32 }
         }
         do { try fm.setAttributes([.modificationDate: item.mtime], ofItemAtPath: partial.path) }
         catch { abort("gagal mengatur tanggal: \(error.localizedDescription)"); continue }
-        if renamex_np(partial.path, final.path, UInt32(RENAME_EXCL)) != 0 {
-            let e = errno
+        if let e = renameExclusive(partial.path, final.path) {
             abort(e == EEXIST ? "tujuan sudah ada, tidak ditimpa" : String(cString: strerror(e)))
             continue
         }
@@ -157,4 +171,18 @@ private struct WriteFailure: Error { let errno: Int32 }
         emit()
     }
     return report
+}
+
+/// `rename` yang tidak pernah menimpa. nil = sukses, selain itu errno (EEXIST jika tujuan sudah ada).
+func renameExclusive(_ from: String, _ to: String) -> Int32? {
+    if renamex_np(from, to, UInt32(RENAME_EXCL)) == 0 { return nil }
+    let e = errno
+    guard e == ENOTSUP || e == EINVAL else { return e }
+    // Fallback untuk exFAT/FAT yang tidak mendukung RENAME_EXCL.
+    // ponytail: ada jendela TOCTOU kecil antara lstat dan rename; hanya proses lain yang membuat
+    // file bernama sama tepat di celah itu yang bisa tertimpa. Diterima untuk tujuan non-APFS/HFS.
+    var st = stat()
+    if lstat(to, &st) == 0 { return EEXIST }
+    if errno != ENOENT { return errno }
+    return rename(from, to) == 0 ? nil : errno
 }

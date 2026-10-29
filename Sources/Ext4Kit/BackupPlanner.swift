@@ -66,14 +66,24 @@ public struct BackupPlan: Sendable {
     return missing
 }
 
+/// Ruang kosong di volume `url`. "ImportantUsage" bisa nil/0 di volume non-boot (eksternal),
+/// jadi jatuh ke kapasitas biasa lalu `statfs`.
+func availableCapacity(_ url: URL) -> Int64 {
+    let v = try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey])
+    if let n = v?.volumeAvailableCapacityForImportantUsage, n > 0 { return n }
+    if let n = v?.volumeAvailableCapacity, n > 0 { return Int64(n) }
+    var st = statfs()
+    guard statfs(url.path, &st) == 0 else { return 0 }
+    return Int64(clamping: UInt64(st.f_bavail) &* UInt64(st.f_bsize))
+}
+
 @LwExt4 public func makePlan(_ v: Volume, root: String, selection: Selection,
                              destination: URL) throws(Ext4Error) -> BackupPlan {
     guard v.superblock.isClean else { throw .notClean }
     var isDir: ObjCBool = false
     guard FileManager.default.fileExists(atPath: destination.path, isDirectory: &isDir), isDir.boolValue
     else { throw .destinationMissing }
-    let available = (try? destination.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?
-        .volumeAvailableCapacityForImportantUsage ?? 0
+    let available = availableCapacity(destination)
 
     var items: [BackupItem] = []
     var claimed = Set<String>()

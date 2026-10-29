@@ -37,9 +37,16 @@ public struct Entry: Hashable, Sendable {
             }
             bsize = 512; bcount = UInt64(st.st_size) / 512
         }
+        guard bsize > 0, bsize & (bsize - 1) == 0 else {
+            Darwin.close(fd); throw .unsupported("ukuran blok perangkat tidak didukung")
+        }
         let sb: Superblock
         do { sb = try Superblock.read(fd: fd, sectorSize: Int(bsize)) }
         catch { Darwin.close(fd); throw error }
+        // lwext4 mengasumsikan blok fs kelipatan blok perangkat (assert-nya mati di build rilis).
+        guard sb.blockSize % Int(bsize) == 0 else {
+            Darwin.close(fd); throw .unsupported("ukuran blok perangkat tidak didukung")
+        }
         counter += 1
         return try Volume(fd: fd, sb: sb, n: counter, bsize: bsize, bcount: bcount)
     }
@@ -66,6 +73,9 @@ public struct Entry: Hashable, Sendable {
         }
         mounted = true
     }
+
+    /// Setelah `close()` semua API melempar `.io(ENXIO)` (dianggap "disk hilang" oleh runner).
+    private func checkOpen() throws(Ext4Error) { if !mounted { throw .io(ENXIO) } }
 
     private func cpath(_ path: String) -> String { path == "/" ? mp + "/" : mp + path }
 
@@ -106,12 +116,14 @@ public struct Entry: Hashable, Sendable {
     }
 
     public func entry(_ path: String) throws(Ext4Error) -> Entry {
+        try checkOpen()
         let name = path == "/" ? "/" : String(path.split(separator: "/").last ?? "")
         return try makeEntry(name: name, valid: true,
                              fsPath: path, cPath: Array(cpath(path).utf8) + [0])
     }
 
     public func list(_ path: String) throws(Ext4Error) -> [Entry] {
+        try checkOpen()
         let dirC = cpath(path)
         var dir = ext4_dir()
         let rc = ext4_dir_open(&dir, dirC)
@@ -136,25 +148,47 @@ public struct Entry: Hashable, Sendable {
         }
     }
 
+    /// File sumber yang sudah dibuka; dibaca per potongan 1 MiB.
+    @LwExt4 public final class OpenFile {
+        private let volume: Volume
+        private var f = ext4_file()
+        private var isOpen = true
+        fileprivate init(volume: Volume, file: ext4_file) { self.volume = volume; f = file }
+
+        /// Gagal baca lwext4 -> `Ext4Error.io(rc)` (untuk deteksi disk dicabut).
+        public func read(_ body: (UnsafeRawBufferPointer) throws -> Void) throws {
+            let chunk = 1 << 20
+            let buf = UnsafeMutableRawBufferPointer.allocate(byteCount: chunk, alignment: 16)
+            defer { buf.deallocate() }
+            while true {
+                guard isOpen, volume.mounted else { throw Ext4Error.io(ENXIO) }
+                var n = 0
+                let rc = ext4_fread(&f, buf.baseAddress, chunk, &n)
+                if rc != EOK { throw Ext4Error.io(rc) }
+                if n == 0 { break }
+                try body(UnsafeRawBufferPointer(rebasing: buf[0..<n]))
+            }
+        }
+
+        public func close() { if isOpen { isOpen = false; ext4_fclose(&f) } }
+    }
+
+    public func open(_ path: String) throws(Ext4Error) -> OpenFile {
+        try checkOpen()
+        var f = ext4_file()
+        let rc = ext4_fopen(&f, cpath(path), "rb")
+        if rc == ENOENT {
+            throw path.contains("\u{FFFD}") ? .unsupported("nama bukan UTF-8 valid") : .notFound(path)
+        }
+        if rc != EOK { throw .io(rc) }
+        return OpenFile(volume: self, file: f)
+    }
+
     /// Potongan 1 MiB. Gagal baca/buka lwext4 -> `Ext4Error.io(rc)` (untuk deteksi disk dicabut).
     public func read(_ path: String, _ body: (UnsafeRawBufferPointer) throws -> Void) throws {
-        var f = ext4_file()
-        var rc = ext4_fopen(&f, cpath(path), "rb")
-        if rc == ENOENT {
-            throw path.contains("\u{FFFD}") ? Ext4Error.unsupported("nama bukan UTF-8 valid") : Ext4Error.notFound(path)
-        }
-        if rc != EOK { throw Ext4Error.io(rc) }
-        defer { ext4_fclose(&f) }
-        let chunk = 1 << 20
-        let buf = UnsafeMutableRawBufferPointer.allocate(byteCount: chunk, alignment: 16)
-        defer { buf.deallocate() }
-        while true {
-            var n = 0
-            rc = ext4_fread(&f, buf.baseAddress, chunk, &n)
-            if rc != EOK { throw Ext4Error.io(rc) }
-            if n == 0 { break }
-            try body(UnsafeRawBufferPointer(rebasing: buf[0..<n]))
-        }
+        let file = try open(path)
+        defer { file.close() }
+        try file.read(body)
     }
 
     public func close() {

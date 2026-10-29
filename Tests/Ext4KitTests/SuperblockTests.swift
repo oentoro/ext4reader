@@ -24,6 +24,12 @@ import Foundation
         #expect(try !read(Fixtures.dirty).isClean)
     }
 
+    @Test func zeroSectorSizeIsRejected() {
+        let fd = Darwin.open(Fixtures.trixie.path, Darwin.O_RDONLY)
+        defer { close(fd) }
+        #expect(throws: Ext4Error.io(EINVAL)) { try Superblock.read(fd: fd, sectorSize: 0) }
+    }
+
     @Test func rejectsNonExt4() {
         #expect(throws: Ext4Error.notExt4) { try Superblock(bytes: [UInt8](repeating: 0, count: 1024)) }
     }

@@ -22,8 +22,11 @@ static int fd_bread(struct ext4_blockdev *bdev, void *buf, uint64_t blk_id, uint
     size_t done = 0;
     while (done < len) {
         ssize_t n = pread(c->fd, p + done, len - done, off + (off_t)done);
-        if (n < 0 && errno == EINTR) continue;
-        if (n <= 0) return EIO;
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            return errno ? errno : EIO;   /* errno asli (mis. ENXIO saat disk dicabut) */
+        }
+        if (n == 0) return EIO;           /* baca pendek: di luar akhir perangkat */
         done += (size_t)n;
     }
     return EOK;
