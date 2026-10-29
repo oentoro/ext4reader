@@ -41,7 +41,7 @@ import DiskArbitration
         let internalDisk = d[kDADiskDescriptionDeviceInternalKey as String] as? Bool ?? true
         let isLinux = content.uppercased() == linuxGUID || content == "Linux"
         let isBareExternal = whole && !internalDisk && content.isEmpty
-        guard isLinux || isBareExternal else { return nil }
+        guard (isLinux || isBareExternal) && !internalDisk else { return nil }
         let size = (d[kDADiskDescriptionMediaSizeKey as String] as? NSNumber)?.int64Value ?? 0
         let media = (d[kDADiskDescriptionMediaNameKey as String] as? String) ?? "Disk"
         return Candidate(bsdName: name, title: "\(media) (\(name))", size: size)

@@ -7,7 +7,14 @@ struct SidebarView: View {
     var body: some View {
         List(selection: $model.selectedSourceID) {
             ForEach(model.sources) { s in
-                Label(s.title, systemImage: "externaldrive")
+                HStack {
+                    Label(s.title, systemImage: "externaldrive")
+                    if isNeedsOpen(s.status) {
+                        Spacer()
+                        Button("Buka") { Task { await model.openCandidate(s.id) } }
+                            .help("Klik untuk membuka, perlu password admin")
+                    }
+                }
                     .badge(Text(icon(s.status)))
                     .tag(s.id)
                     .help(isNeedsOpen(s.status) ? "Klik untuk membuka, perlu password admin" : "")
