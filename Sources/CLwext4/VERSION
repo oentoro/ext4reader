@@ -20,3 +20,5 @@ Patches (all minimal):
      ext4_crc32c(EXT4_CRC32_INIT, sb->uuid, sizeof(sb->uuid)) with ext4_sb_csum_seed(sb).
      (journal uuid uses in ext4_journal.c untouched.)
 Note: orphan_file (COMPAT) needs no patch; lwext4 does not check compat bits.
+4. Listing speed: include/ext4.h + src/ext4.c add ext4_raw_inode_fill_by_ino()
+   (inode by number; ext4_raw_inode_fill does a path lookup per entry, O(n^2) on 20k-entry dirs).

@@ -2128,6 +2128,26 @@ int ext4_raw_inode_fill(const char *path, uint32_t *ret_ino,
 	return r;
 }
 
+int ext4_raw_inode_fill_by_ino(const char *mount_point, uint32_t ino,
+			       struct ext4_inode *inode)
+{
+	int r;
+	struct ext4_inode_ref inode_ref;
+	struct ext4_mountpoint *mp = ext4_get_mount(mount_point);
+
+	if (!mp)
+		return ENOENT;
+
+	EXT4_MP_LOCK(mp);
+	r = ext4_fs_get_inode_ref(&mp->fs, ino, &inode_ref);
+	if (r == EOK) {
+		memcpy(inode, inode_ref.inode, sizeof(struct ext4_inode));
+		ext4_fs_put_inode_ref(&inode_ref);
+	}
+	EXT4_MP_UNLOCK(mp);
+	return r;
+}
+
 int ext4_inode_exist(const char *path, int type)
 {
 	int r;

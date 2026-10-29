@@ -395,6 +395,11 @@ uint64_t ext4_fsize(ext4_file *file);
 int ext4_raw_inode_fill(const char *path, uint32_t *ret_ino,
 			struct ext4_inode *inode);
 
+/**@brief Like ext4_raw_inode_fill, but by inode number (no path lookup).
+ *        Local patch: avoids O(n) directory lookup per entry when listing.*/
+int ext4_raw_inode_fill_by_ino(const char *mount_point, uint32_t ino,
+			       struct ext4_inode *inode);
+
 /**@brief Check if inode exists.
  *
  * @param path    Parh to file/dir/link.
