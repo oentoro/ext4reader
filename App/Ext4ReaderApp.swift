@@ -7,6 +7,7 @@ import SwiftUI
         WindowGroup {
             ContentView(model: model)
                 .frame(minWidth: 800, minHeight: 500)
+                .task { model.startDiskWatching() }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
                     // Tutup volume sebelum keluar; tunggu singkat agar umount selesai.
                     let done = DispatchSemaphore(value: 0)

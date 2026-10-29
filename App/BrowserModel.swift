@@ -43,8 +43,42 @@ import Ext4Kit
         await register(id: id, title: title, fd: fd) { () throws(Ext4Error) -> Volume in try Volume.open(fd: fd) }
     }
 
+    // MARK: - Disk fisik
+
+    private let watcher = DiskWatcher()
+    private var openingDisks: Set<String> = []
+
+    func startDiskWatching() {
+        watcher.onAppear = { [unowned self] c in
+            guard !sources.contains(where: { $0.id == c.bsdName }) else { return }
+            sources.append(Source(id: c.bsdName, title: c.title, status: .needsOpen))
+        }
+        watcher.onDisappear = { [unowned self] name in
+            Task { await removeSource(name) }
+        }
+        watcher.start()
+    }
+
+    /// Dipanggil saat baris .needsOpen diklik; memunculkan dialog password admin.
+    func openCandidate(_ id: String) async {
+        guard let s = sources.first(where: { $0.id == id }), case .needsOpen = s.status,
+              openingDisks.insert(id).inserted else { return }
+        defer { openingDisks.remove(id) }
+        do {
+            let fd = try await Task.detached { try RawDiskOpener.openReadOnly(bsdName: id) }.value
+            guard sources.contains(where: { $0.id == id }) else { Darwin.close(fd); return }   // dicabut selagi dialog
+            await addOpened(fd: fd, id: id, title: s.title)
+        } catch {
+            errorMessage = "Tidak bisa membuka \(s.title): \(error.localizedDescription)"
+        }
+    }
+
     private func register(id: String, title: String, fd: Int32? = nil,
                           _ make: @escaping @LwExt4 @Sendable () throws(Ext4Error) -> Volume) async {
+        // placeholder .needsOpen (tanpa volume) diganti, bukan dianggap duplikat
+        if let i = sources.firstIndex(where: { $0.id == id }), sources[i].volume == nil, case .needsOpen = sources[i].status {
+            sources.remove(at: i)
+        }
         if sources.contains(where: { $0.id == id }) {
             if let fd { Darwin.close(fd) }   // fd baru tidak dipakai
             selectedSourceID = id; return
