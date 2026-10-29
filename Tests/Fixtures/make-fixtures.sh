@@ -37,6 +37,17 @@ CMD
 "$E2/sbin/debugfs" -w -f $B/cmds $B/trixie.img >/dev/null
 rm $B/cmds $B/up.tmp $B/low.tmp $B/nfd.txt $B/bad.txt
 
+# -U made mkfs enable metadata_csum_seed; real Debian images are unseeded.
+"$E2/sbin/tune2fs" -O ^metadata_csum_seed $B/trixie.img >/dev/null
+
+# Small seeded image (keeps metadata_csum_seed) to exercise the seeded path.
+mkdir -p $B/seedsrc/a/b; echo hello-seeded > $B/seedsrc/a/b/f.txt; echo top > $B/seedsrc/top.txt
+truncate -s 32M $B/seeded.img
+"$E2/sbin/mkfs.ext4" -q -F -b 4096 -I 256 \
+  -O has_journal,extent,huge_file,flex_bg,metadata_csum,64bit,dir_nlink,extra_isize,orphan_file \
+  -L SEEDED -U 11111111-2222-3333-4444-555555555556 -d $B/seedsrc $B/seeded.img
+rm -rf $B/seedsrc
+
 cp $B/trixie.img $B/dirty.img
 "$E2/sbin/debugfs" -w -R "feature needs_recovery" $B/dirty.img >/dev/null
 echo OK

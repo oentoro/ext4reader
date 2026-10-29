@@ -14,6 +14,7 @@ enum Fixtures {
         return u
     }
     static var trixie: URL { file("trixie.img") }
+    static var seeded: URL { file("seeded.img") }
     static var dirty: URL { file("dirty.img") }
     static var srcTree: URL { file("src") }
 }
