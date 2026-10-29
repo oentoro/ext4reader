@@ -37,6 +37,9 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .sheet(isPresented: Binding(get: { model.backup != nil }, set: { _ in })) {
+            if let b = model.backup { BackupSheet(session: b) }
+        }
         .alert("Ini terlihat seperti library Immich. Jadikan \(model.immichSuggestion?.path ?? "") akar backup?",
                isPresented: Binding(get: { model.immichSuggestion != nil }, set: { if !$0 { model.immichSuggestion = nil } })) {
             Button("Ya") { if let s = model.immichSuggestion, s.sourceID == model.selectedSourceID { model.setBackupRoot(s.path) }; model.immichSuggestion = nil }

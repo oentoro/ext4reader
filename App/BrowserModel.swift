@@ -25,6 +25,7 @@ import Ext4Kit
     var immichSuggestion: (sourceID: String, path: String)?                 // alert saran akar
     var pendingRoot: String?                      // alert peringatan ganti akar (spec §6a)
     var errorMessage: String?
+    var backup: BackupSession?                    // sheet backup
 
     private var loadingSettings = false
     private var totalsTask: Task<Void, Never>?
@@ -129,8 +130,6 @@ import Ext4Kit
         settings.selection = Selection()     // path relatif lama tak berlaku lagi di akar baru
         pendingRoot = nil
     }
-
-    func startBackup() {}   // Task 9
 
     // MARK: - Total terpilih
 
