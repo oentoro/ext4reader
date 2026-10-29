@@ -1,21 +1,37 @@
 import SwiftUI
 
 @main struct Ext4ReaderApp: App {
-    @State private var model = BrowserModel()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     var body: some Scene {
         WindowGroup {
-            ContentView(model: model)
+            ContentView(model: delegate.model)
                 .frame(minWidth: 800, minHeight: 500)
-                .task { model.startDiskWatching() }
-                .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
-                    // Tutup volume sebelum keluar; tunggu singkat agar umount selesai.
-                    let done = DispatchSemaphore(value: 0)
-                    let vols = model.sources.compactMap(\.volume)
-                    Task.detached { for v in vols { await BrowserModel.close(v) }; done.signal() }
-                    _ = done.wait(timeout: .now() + 2)
-                }
+                .task { delegate.model.startDiskWatching() }
         }
+    }
+}
+
+@MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
+    let model = BrowserModel()
+    private var volumesClosed = false
+
+    /// Keluar: batalkan backup dulu (runner menghapus partial di potongan berikut), tunggu ia
+    /// selesai, lalu tutup volume. Semua menunggu dibatasi waktu agar app tetap bisa keluar.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        model.backup?.cancel()
+        Task {
+            await waitUntil(seconds: 10) { !(model.backup?.isRunning ?? false) }
+            Task { await model.closeAll(); volumesClosed = true }
+            await waitUntil(seconds: 2) { volumesClosed }
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
+    private func waitUntil(seconds: Int, _ done: () -> Bool) async {
+        let deadline = ContinuousClock.now + .seconds(seconds)
+        while !done() && ContinuousClock.now < deadline { try? await Task.sleep(for: .milliseconds(50)) }
     }
 }
 

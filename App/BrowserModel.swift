@@ -116,12 +116,14 @@ import Ext4Kit
     func removeSource(_ id: String) async {
         guard let i = sources.firstIndex(where: { $0.id == id }) else { return }
         let s = sources.remove(at: i)
+        if backup?.sourceID == id { backup?.sourceRemoved() }   // sebelum close: runner berhenti di potongan berikut
         if selectedSourceID == id { selectedSourceID = sources.first?.id }
         if let v = s.volume { await Self.close(v) }
     }
 
     func closeAll() async {
         let vols = sources.compactMap(\.volume)
+        backup?.sourceRemoved()
         sources = []; selectedSourceID = nil
         for v in vols { await Self.close(v) }
     }

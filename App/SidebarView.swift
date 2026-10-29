@@ -18,7 +18,6 @@ struct SidebarView: View {
                     .badge(Text(icon(s.status)))
                     .tag(s.id)
                     .help(isNeedsOpen(s.status) ? "Klik untuk membuka, perlu password admin" : "")
-                    .onTapGesture { if isNeedsOpen(s.status) { Task { await model.openCandidate(s.id) } } }
                     .contextMenu { Button("Tutup") { Task { await model.removeSource(s.id) } } }
             }
         }
