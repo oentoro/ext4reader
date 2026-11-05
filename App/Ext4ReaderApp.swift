@@ -57,18 +57,6 @@ struct ContentView: View {
         .sheet(isPresented: Binding(get: { model.backup != nil }, set: { _ in })) {
             if let b = model.backup { BackupSheet(session: b) }
         }
-        .alert("Ini terlihat seperti library Immich. Jadikan \(model.immichSuggestion?.path ?? "") akar backup?",
-               isPresented: Binding(get: { model.immichSuggestion != nil }, set: { if !$0 { model.immichSuggestion = nil } })) {
-            Button("Ya") { if let s = model.immichSuggestion, s.sourceID == model.selectedSourceID { model.setBackupRoot(s.path) }; model.immichSuggestion = nil }
-            Button("Tidak", role: .cancel) { model.immichSuggestion = nil }
-        }
-        .alert("Ganti akar backup?",
-               isPresented: Binding(get: { model.pendingRoot != nil }, set: { if !$0 { model.pendingRoot = nil } })) {
-            Button("Ganti", role: .destructive) { if let p = model.pendingRoot { model.applyRoot(p) } }
-            Button("Batal", role: .cancel) { model.pendingRoot = nil }
-        } message: {
-            Text("Setelah backup pernah dilakukan, mengganti akar membuat file dianggap baru di folder tujuan yang sama. Pilihan centang akan dikosongkan.")
-        }
         .alert("Gagal", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
             Button("OK") { model.errorMessage = nil }
         } message: { Text(model.errorMessage ?? "") }

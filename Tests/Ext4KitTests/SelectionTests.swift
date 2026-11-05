@@ -49,3 +49,11 @@ import Foundation
         #expect(try JSONDecoder().decode(Selection.self, from: JSONEncoder().encode(s)) == s)
     }
 }
+
+@Test func copyPathStartsAtTopmostSelectedItem() {
+    var s = Selection(); s.set("a/b", true); s.set("x", true)
+    #expect(copyPath("a/b/c/f.txt", s) == "b/c/f.txt")
+    #expect(copyPath("x", s) == "x")
+    var all = Selection(); all.set("", true)
+    #expect(copyPath("a/b/f.txt", all) == "a/b/f.txt")
+}

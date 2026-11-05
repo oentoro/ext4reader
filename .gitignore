@@ -3,3 +3,5 @@
 .build/
 Tests/Fixtures/build/
 *.xcodeproj
+build/
+.swiftpm/

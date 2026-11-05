@@ -11,7 +11,7 @@ struct BottomBar: View {
                 Text("Dipilih: menghitung…")
             }
             Spacer()
-            Button("Backup ke…") { model.startBackup() }
+            Button("Salin ke…") { model.startBackup() }
                 .disabled(model.totals?.files ?? 0 == 0)
         }
         .padding(8)

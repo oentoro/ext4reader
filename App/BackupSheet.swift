@@ -4,14 +4,15 @@ import UniformTypeIdentifiers
 import os
 import Ext4Kit
 
-/// Satu sesi backup: pratinjau -> progress -> laporan. Dimiliki BrowserModel selama sheet terbuka.
-/// Terikat pada source, volume, akar, pilihan dan tujuan saat dibuat; tidak ikut berganti
+/// Satu sesi salin: pratinjau -> progress -> laporan. Dimiliki BrowserModel selama sheet terbuka.
+/// Terikat pada source, volume, pilihan dan tujuan saat dibuat; tidak ikut berganti
 /// jika disk lain dipilih di sidebar.
 @MainActor @Observable final class BackupSession {
     enum Phase {
         case planning
         case preview(BackupPlan)
         case failed(String)
+        case unclean                   // disk kotor; pengguna bisa memilih "Salin tetap"
         case running
         case report(BackupReport)
     }
@@ -19,25 +20,23 @@ import Ext4Kit
     var progress: BackupProgress?
     var speed: Double?                 // byte/detik, rata-rata bergerak 5 detik
     var cancelling = false
-    private(set) var destination: URL?
+    private(set) var destination: URL
     private(set) var sourceGone = false
 
     let sourceID: String
     private unowned let model: BrowserModel
-    private let uuid: UUID
     private let volume: Volume
-    private let root: String
     private let selection: Selection
     private let cancelFlag = OSAllocatedUnfairLock(initialState: false)   // dibaca dari actor LwExt4
     private var samples: [(t: ContinuousClock.Instant, bytes: UInt64)] = []
     private var planTask: Task<Void, Never>?
+    private var allowUnclean = false
 
     private static let goneMessage = "Disk terputus. Colok lagi disk sumber lalu buka ulang."
 
-    init(model: BrowserModel, sourceID: String, uuid: UUID, volume: Volume, root: String,
-         selection: Selection, destination: URL?) {
-        self.model = model; self.sourceID = sourceID; self.uuid = uuid
-        self.volume = volume; self.root = root; self.selection = selection; self.destination = destination
+    init(model: BrowserModel, sourceID: String, volume: Volume, selection: Selection, destination: URL) {
+        self.model = model; self.sourceID = sourceID
+        self.volume = volume; self.selection = selection; self.destination = destination
         replan()
     }
 
@@ -46,32 +45,26 @@ import Ext4Kit
     func replan() {
         planTask?.cancel()
         if sourceGone { phase = .failed(Self.goneMessage); return }
-        guard let dest = destination else { phase = .failed("Folder tujuan tidak ditemukan. Colok disk tujuan atau pilih folder lain."); return }
+        let dest = destination
         phase = .planning
-        let (v, r, s) = (volume, root, selection)
+        let (v, r, s, u) = (volume, "/", selection, allowUnclean)
         planTask = Task {
-            let res = await Self.plan(v, r, s, dest)
+            let res = await Self.plan(v, r, s, dest, u)
             if Task.isCancelled || sourceGone { return }
             switch res {
             case .success(let p): phase = .preview(p)
-            case .failure(.notClean): phase = .failed("Disk ini tidak dilepas dengan bersih. Mount lalu umount disk ini sekali di Linux.")
+            case .failure(.notClean): phase = .unclean
             case .failure(.destinationMissing): phase = .failed("Folder tujuan tidak ditemukan. Colok disk tujuan atau pilih folder lain.")
-            case .failure(let e): phase = .failed("Gagal membuat rencana backup: \(e)")
+            case .failure(let e): phase = .failed("Gagal membuat rencana salin: \(e)")
             }
         }
     }
 
-    /// Simpan ke pengaturan disk milik sesi ini (bukan disk yang kebetulan sedang dipilih).
+    func copyAnyway() { allowUnclean = true; replan() }
+
     func changeDestination() {
         guard !sourceGone, let url = BrowserModel.pickFolder() else { return }
         destination = url
-        if model.selectedSourceID == sourceID {
-            model.settings.destination = url.path            // tersimpan lewat didSet
-        } else {
-            var s = DiskSettings.load(uuid: uuid)
-            s.destination = url.path
-            try? s.save(uuid: uuid)
-        }
         replan()
     }
 
@@ -86,7 +79,8 @@ import Ext4Kit
     }
 
     func start(_ plan: BackupPlan) {
-        guard !sourceGone, let dest = destination else { return }
+        guard !sourceGone else { return }
+        let dest = destination
         phase = .running; progress = nil; speed = nil; cancelling = false; samples = []
         cancelFlag.withLock { $0 = false }
         let (v, flag) = (volume, cancelFlag)
@@ -119,9 +113,9 @@ import Ext4Kit
 
     func close() { planTask?.cancel(); model.backup = nil }
 
-    @LwExt4 private static func plan(_ v: Volume, _ root: String, _ sel: Selection, _ dest: URL)
+    @LwExt4 private static func plan(_ v: Volume, _ root: String, _ sel: Selection, _ dest: URL, _ allowUnclean: Bool)
         -> Result<BackupPlan, Ext4Error> {
-        do { return .success(try makePlan(v, root: root, selection: sel, destination: dest)) }
+        do { return .success(try makePlan(v, root: root, selection: sel, destination: dest, allowUnclean: allowUnclean)) }
         catch { return .failure(error) }
     }
 
@@ -142,19 +136,13 @@ extension BrowserModel {
         let p = NSOpenPanel()
         p.canChooseFiles = false; p.canChooseDirectories = true
         p.canCreateDirectories = true; p.allowsMultipleSelection = false
-        p.prompt = "Pilih"; p.message = "Pilih folder tujuan backup"
+        p.prompt = "Salin ke sini"; p.message = "Pilih folder tujuan di komputer ini"
         return p.runModal() == .OK ? p.url : nil
     }
 
     func startBackup() {
-        guard let s = selected, let v = s.volume, let uuid = s.uuid else { return }
-        if settings.destination == nil {
-            guard let url = Self.pickFolder() else { return }
-            settings.destination = url.path
-        }
-        backup = BackupSession(model: self, sourceID: s.id, uuid: uuid, volume: v, root: root,
-                               selection: settings.selection,
-                               destination: settings.destination.map { URL(fileURLWithPath: $0) })
+        guard let s = selected, let v = s.volume, let url = Self.pickFolder() else { return }
+        backup = BackupSession(model: self, sourceID: s.id, volume: v, selection: settings.selection, destination: url)
     }
 }
 
@@ -173,6 +161,15 @@ struct BackupSheet: View {
                 Text(msg)
                 if !session.sourceGone { destinationRow }
                 HStack { Spacer(); Button("Tutup") { session.close() } }
+            case .unclean:
+                Text("Disk ini tidak dilepas dengan bersih").font(.headline)
+                Text("Cara aman: mount lalu umount disk ini sekali di Linux. Jika tetap disalin, sebagian besar file aman, tetapi file yang sedang ditulis sebelum disk dicabut bisa kosong, terpotong, atau versi lama.")
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Spacer()
+                    Button("Tutup") { session.close() }.keyboardShortcut(.cancelAction)
+                    Button("Salin tetap") { session.copyAnyway() }
+                }
             case .preview(let plan):
                 PreviewView(session: session, plan: plan)
             case .running:
@@ -188,7 +185,7 @@ struct BackupSheet: View {
 
     var destinationRow: some View {
         HStack {
-            Text("Tujuan: \(session.destination?.path ?? "—")").lineLimit(1).truncationMode(.middle)
+            Text("Tujuan: \(session.destination.path)").lineLimit(1).truncationMode(.middle)
             Spacer()
             Button("Ganti tujuan…") { session.changeDestination() }
         }
@@ -202,14 +199,14 @@ private extension BackupSheet {
         var body: some View {
             let c = plan.counts
             let nothing = c.copy + c.conflict == 0
-            Text("Pratinjau backup").font(.headline)
+            Text("Pratinjau salin").font(.headline)
             Text("\(plan.items.count) dipilih → \(c.copy) baru (\(bytes(plan.bytesToCopy))), \(c.skip) dilewati, \(c.conflict) konflik, \(c.fail) gagal")
             if !plan.missingSelections.isEmpty {
                 Text("hilang: \(plan.missingSelections.count)").foregroundStyle(.orange)
                 List(plan.missingSelections, id: \.self) { Text("hilang: \($0)") }.frame(height: 80)
             }
             HStack {
-                Text("Tujuan: \(session.destination?.path ?? "—")").lineLimit(1).truncationMode(.middle)
+                Text("Tujuan: \(session.destination.path)").lineLimit(1).truncationMode(.middle)
                 Spacer()
                 Button("Ganti tujuan…") { session.changeDestination() }
             }
@@ -258,7 +255,7 @@ private extension BackupSheet {
         let session: BackupSession
         let report: BackupReport
         var body: some View {
-            Text("Laporan backup").font(.headline)
+            Text("Laporan salin").font(.headline)
             if let r = report.stopReason { Text(reason(r)).foregroundStyle(.red) }
             Text("Disalin: \(report.copied.count) · Dilewati: \(report.skipped) · Konflik: \(report.conflicts.count) · Gagal: \(report.failures.count)")
             if !report.conflicts.isEmpty || !report.failures.isEmpty {
@@ -289,7 +286,7 @@ private extension BackupSheet {
         func save() {
             let p = NSSavePanel()
             p.allowedContentTypes = [.plainText]
-            p.nameFieldStringValue = "laporan-backup.txt"
+            p.nameFieldStringValue = "laporan-salin.txt"
             guard p.runModal() == .OK, let url = p.url else { return }
             try? report.text().write(to: url, atomically: true, encoding: .utf8)
         }

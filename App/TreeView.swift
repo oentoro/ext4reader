@@ -5,16 +5,7 @@ struct TreeView: View {
     let model: BrowserModel
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Image(systemName: "flag.fill").foregroundStyle(.orange)
-                Text(model.root == "/" ? "/ (seluruh disk)" : model.root).font(.callout.monospaced())
-                Spacer()
-            }
-            .padding(8)
-            Divider()
-            List { TreeChildren(model: model, path: "/") }
-        }
+        List { TreeChildren(model: model, path: "/") }
     }
 }
 
@@ -60,11 +51,11 @@ private struct RowContent: View {
     let model: BrowserModel
     let entry: Entry
 
-    private func symbol(_ s: Selection.State?) -> String {
+    private func symbol(_ s: Selection.State) -> String {
         switch s {
-        case .on?: "checkmark.square"
-        case .mixed?: "minus.square"
-        default: "square"
+        case .on: "checkmark.square"
+        case .mixed: "minus.square"
+        case .off: "square"
         }
     }
 
@@ -74,10 +65,9 @@ private struct RowContent: View {
             Button { model.toggle(entry.path) } label: {
                 Image(systemName: symbol(state))
             }
-            .buttonStyle(.plain).disabled(state == nil || !entry.hasValidName)
+            .buttonStyle(.plain).disabled(!entry.hasValidName)
             Image(systemName: entry.kind == .directory ? "folder" : "doc")
             Text(entry.name)
-            if model.root == entry.path { Image(systemName: "flag.fill").foregroundStyle(.orange) }
             Spacer()
             if entry.kind != .directory {
                 Text(ByteCountFormatter.string(fromByteCount: Int64(entry.size), countStyle: .file))
@@ -85,11 +75,6 @@ private struct RowContent: View {
             }
             Text(entry.mtime.formatted(date: .abbreviated, time: .shortened))
                 .foregroundStyle(.secondary).frame(width: 150, alignment: .trailing)
-        }
-        .contextMenu {
-            if entry.kind == .directory && entry.hasValidName {
-                Button("Jadikan akar backup") { model.setBackupRoot(entry.path) }
-            }
         }
     }
 }

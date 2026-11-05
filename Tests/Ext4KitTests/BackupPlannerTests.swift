@@ -5,6 +5,7 @@ import Foundation
 @Suite struct BackupPlannerTests {
     static let lib = "/immich/library/library"
     static let f1 = "admin/2026/07/01/IMG_0001.heic"
+    static let d1 = "01/IMG_0001.heic"   // tujuan f1 saat memilih "admin/2026/07/01"
 
     func copyFile(_ rel: String, into tmp: URL, to name: String? = nil, mtimeOffset: TimeInterval = 0, extra: Bool = false) throws {
         let dst = tmp.appending(path: name ?? rel)
@@ -18,26 +19,26 @@ import Foundation
     @Test @LwExt4 func freshDestinationCopiesSelection() throws {
         let v = try Volume.openImage(Fixtures.trixie); defer { v.close() }
         let p = try makePlan(v, root: Self.lib, selection: sel("admin/2026/07"), destination: tmpDir())
-        #expect(p.items.map(\.action) == [.copy(to: "admin/2026/07/01/IMG_0001.heic"), .copy(to: "admin/2026/07/02/IMG_0002.heic")])
+        #expect(p.items.map(\.action) == [.copy(to: "07/01/IMG_0001.heic"), .copy(to: "07/02/IMG_0002.heic")])
         #expect(p.counts.copy == 2 && p.bytesToCopy == p.items.reduce(0) { $0 + $1.size })
         #expect(p.hasEnoughSpace)
     }
     @Test @LwExt4 func matchingFileIsSkipped() throws {
         let v = try Volume.openImage(Fixtures.trixie); defer { v.close() }
-        let t = tmpDir(); try copyFile(Self.f1, into: t, mtimeOffset: 1)
+        let t = tmpDir(); try copyFile(Self.f1, into: t, to: Self.d1, mtimeOffset: 1)
         let p = try makePlan(v, root: Self.lib, selection: sel("admin/2026/07/01"), destination: t)
         #expect(p.items.map(\.action) == [.skip])
     }
     @Test @LwExt4 func differingFileBecomesConflictTwo() throws {
         let v = try Volume.openImage(Fixtures.trixie); defer { v.close() }
-        let t = tmpDir(); try copyFile(Self.f1, into: t, extra: true)
+        let t = tmpDir(); try copyFile(Self.f1, into: t, to: Self.d1, extra: true)
         let p = try makePlan(v, root: Self.lib, selection: sel("admin/2026/07/01"), destination: t)
-        #expect(p.items.map(\.action) == [.conflict(to: "admin/2026/07/01/IMG_0001 (2).heic")])
+        #expect(p.items.map(\.action) == [.conflict(to: "01/IMG_0001 (2).heic")])
     }
     @Test @LwExt4 func earlierConflictCopyMatchingIsSkipped() throws {
         let v = try Volume.openImage(Fixtures.trixie); defer { v.close() }
-        let t = tmpDir(); try copyFile(Self.f1, into: t, extra: true)
-        try copyFile(Self.f1, into: t, to: "admin/2026/07/01/IMG_0001 (2).heic")
+        let t = tmpDir(); try copyFile(Self.f1, into: t, to: Self.d1, extra: true)
+        try copyFile(Self.f1, into: t, to: "01/IMG_0001 (2).heic")
         let p = try makePlan(v, root: Self.lib, selection: sel("admin/2026/07/01"), destination: t)
         #expect(p.items.map(\.action) == [.skip])
     }
@@ -64,15 +65,14 @@ import Foundation
     @Test @LwExt4 func directoryAtFilePathIsNotSkipped() throws {
         let v = try Volume.openImage(Fixtures.trixie); defer { v.close() }
         let t = tmpDir()
-        try FileManager.default.createDirectory(at: t.appending(path: Self.f1), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: t.appending(path: Self.d1), withIntermediateDirectories: true)
         let p = try makePlan(v, root: Self.lib, selection: sel("admin/2026/07/01"), destination: t)
-        #expect(p.items.map(\.action) == [.conflict(to: "admin/2026/07/01/IMG_0001 (2).heic")])
+        #expect(p.items.map(\.action) == [.conflict(to: "01/IMG_0001 (2).heic")])
     }
     @Test @LwExt4 func fileWhereFolderShouldBeFails() throws {
         let v = try Volume.openImage(Fixtures.trixie); defer { v.close() }
         let t = tmpDir()
-        try FileManager.default.createDirectory(at: t.appending(path: "admin/2026"), withIntermediateDirectories: true)
-        try Data([1]).write(to: t.appending(path: "admin/2026/07"))
+        try Data([1]).write(to: t.appending(path: "07"))
         let p = try makePlan(v, root: Self.lib, selection: sel("admin/2026/07"), destination: t)
         #expect(p.items.count == 2 && p.items.allSatisfy { $0.action == .fail("tujuan bukan folder") })
     }
@@ -86,6 +86,7 @@ import Foundation
     @Test @LwExt4 func dirtyVolumeRefused() throws {
         let v = try Volume.openImage(Fixtures.dirty); defer { v.close() }
         #expect(throws: Ext4Error.notClean) { try makePlan(v, root: "/", selection: sel(""), destination: tmpDir()) }
+        #expect(throws: Never.self) { try makePlan(v, root: "/", selection: sel(""), destination: tmpDir(), allowUnclean: true) }
     }
     @Test @LwExt4 func missingDestinationRefusedAndNotCreated() throws {
         let v = try Volume.openImage(Fixtures.trixie); defer { v.close() }

@@ -66,6 +66,16 @@ public struct BackupPlan: Sendable {
     return missing
 }
 
+/// Path di tujuan dimulai dari item terpilih teratas (seperti salin di Finder):
+/// memilih "a/b/c" menyalin ke "c/...", bukan "a/b/c/...".
+func copyPath(_ rel: String, _ selection: Selection) -> String {
+    let c = rel.split(separator: "/")
+    for i in c.indices where selection.isSelected(c[...i].joined(separator: "/")) {
+        return c[i...].joined(separator: "/")
+    }
+    return rel
+}
+
 /// Ruang kosong di volume `url`. "ImportantUsage" bisa nil/0 di volume non-boot (eksternal),
 /// jadi jatuh ke kapasitas biasa lalu `statfs`.
 func availableCapacity(_ url: URL) -> Int64 {
@@ -77,9 +87,11 @@ func availableCapacity(_ url: URL) -> Int64 {
     return Int64(clamping: UInt64(st.f_bavail) &* UInt64(st.f_bsize))
 }
 
+/// `allowUnclean`: pengguna sudah diperingatkan bahwa file yang sedang ditulis saat disk
+/// dicabut bisa rusak (journal tidak diputar ulang karena read-only).
 @LwExt4 public func makePlan(_ v: Volume, root: String, selection: Selection,
-                             destination: URL) throws(Ext4Error) -> BackupPlan {
-    guard v.superblock.isClean else { throw .notClean }
+                             destination: URL, allowUnclean: Bool = false) throws(Ext4Error) -> BackupPlan {
+    guard allowUnclean || v.superblock.isClean else { throw .notClean }
     var isDir: ObjCBool = false
     guard FileManager.default.fileExists(atPath: destination.path, isDirectory: &isDir), isDir.boolValue
     else { throw .destinationMissing }
@@ -141,7 +153,7 @@ func availableCapacity(_ url: URL) -> Int64 {
         // sedangkan `items` tetap dalam urutan enumerasi.
         var actions = [Int: BackupItem.Action]()
         for i in found.indices.sorted(by: { found[$0].1.utf8.lexicographicallyPrecedes(found[$1].1.utf8) }) {
-            actions[i] = decide(found[i].0, found[i].1)
+            actions[i] = decide(found[i].0, copyPath(found[i].1, selection))
         }
         items = found.indices.map { i in
             let (e, rel) = found[i]

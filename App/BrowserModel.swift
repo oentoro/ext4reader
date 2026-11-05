@@ -18,20 +18,17 @@ import Ext4Kit
         didSet {
             guard !loadingSettings, let uuid = selected?.uuid else { return }
             try? settings.save(uuid: uuid)
-            if settings.selection != oldValue.selection || settings.backupRoot != oldValue.backupRoot { recomputeTotals() }
+            if settings.selection != oldValue.selection { recomputeTotals() }
         }
     }
     var totals: (files: Int, bytes: UInt64)?      // nil = "menghitung…"
-    var immichSuggestion: (sourceID: String, path: String)?                 // alert saran akar
-    var pendingRoot: String?                      // alert peringatan ganti akar (spec §6a)
     var errorMessage: String?
-    var backup: BackupSession?                    // sheet backup
+    var backup: BackupSession?                    // sheet salin
 
     private var loadingSettings = false
     private var totalsTask: Task<Void, Never>?
 
     var selected: Source? { sources.first { $0.id == selectedSourceID } }
-    var root: String { settings.backupRoot ?? "/" }
 
     // MARK: - Membuka
 
@@ -88,9 +85,6 @@ import Ext4Kit
         case .success(let (vol, uuid, clean)):
             sources.append(Source(id: id, title: title, status: clean ? .readOnly : .notClean, volume: vol, uuid: uuid))
             selectedSourceID = id
-            if settings.backupRoot == nil, let p = await Self.suggest(vol), selectedSourceID == id {
-                immichSuggestion = (id, p)
-            }
         case .failure(let e):
             sources.append(Source(id: id, title: title, status: .unsupported(e.localizedDescription)))
             selectedSourceID = id
@@ -103,8 +97,6 @@ import Ext4Kit
         do { let v = try make(); return .success((v, v.superblock.uuid, v.superblock.isClean)) }
         catch { return .failure(error) }
     }
-
-    @LwExt4 private static func suggest(_ v: Volume) -> String? { suggestedImmichRoot(v) }
 
     private func loadSettings() {
         loadingSettings = true
@@ -139,32 +131,14 @@ import Ext4Kit
 
     @LwExt4 private static func list(_ v: Volume, _ path: String) -> [Entry] { (try? v.list(path)) ?? [] }
 
-    /// Path absolut -> relatif ke akar; nil jika di luar akar.
-    func relative(_ path: String) -> String? {
-        if root == "/" { return String(path.drop { $0 == "/" }) }
-        if path == root { return "" }
-        return path.hasPrefix(root + "/") ? String(path.dropFirst(root.count + 1)) : nil
-    }
+    /// Path absolut ext4 -> path relatif yang dipakai Selection.
+    func relative(_ path: String) -> String { String(path.drop { $0 == "/" }) }
 
-    func checkState(_ path: String) -> Selection.State? {
-        relative(path).map { settings.selection.state(of: $0) }
-    }
+    func checkState(_ path: String) -> Selection.State { settings.selection.state(of: relative(path)) }
 
     func toggle(_ path: String) {
-        guard let rel = relative(path) else { return }
+        let rel = relative(path)
         settings.selection.set(rel, settings.selection.state(of: rel) != .on)
-    }
-
-    func setBackupRoot(_ path: String) {
-        let new: String? = path == "/" ? nil : path
-        guard new != settings.backupRoot else { return }
-        if settings.destination != nil { pendingRoot = path } else { applyRoot(path) }
-    }
-
-    func applyRoot(_ path: String) {
-        settings.backupRoot = path == "/" ? nil : path
-        settings.selection = Selection()     // path relatif lama tak berlaku lagi di akar baru
-        pendingRoot = nil
     }
 
     // MARK: - Total terpilih
@@ -173,9 +147,9 @@ import Ext4Kit
         totalsTask?.cancel()
         totals = nil
         guard let v = selected?.volume else { return }
-        let (root, sel) = (self.root, settings.selection)
+        let sel = settings.selection
         totalsTask = Task {
-            let t = try? await Self.count(v, root, sel)
+            let t = try? await Self.count(v, "/", sel)
             if !Task.isCancelled, let t { totals = t }
         }
     }

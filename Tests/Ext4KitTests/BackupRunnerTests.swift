@@ -30,7 +30,7 @@ import Foundation
         let v = try Volume.openImage(Fixtures.trixie); defer { v.close() }
         let tmp = tmpDir()
         let rel = "admin/2026/07/01/IMG_0001.heic"
-        let dst = tmp.appending(path: rel)
+        let dst = tmp.appending(path: "01/IMG_0001.heic")   // memilih ".../01" menyalin ke "01/..."
         try FileManager.default.createDirectory(at: dst.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("lain".utf8).write(to: dst)
         let plan = try makePlan(v, root: Self.lib, selection: sel("admin/2026/07/01"), destination: tmp)
@@ -38,14 +38,14 @@ import Foundation
         let r = runBackup(plan, volume: v, destination: tmp, progress: { _ in }, isCancelled: { false })
         #expect(r.conflicts.count == 1 && r.failures.isEmpty)
         #expect(try Data(contentsOf: dst) == Data("lain".utf8))
-        let two = tmp.appending(path: "admin/2026/07/01/IMG_0001 (2).heic")
+        let two = tmp.appending(path: "01/IMG_0001 (2).heic")
         #expect(sha256(two) == sha256(Fixtures.srcTree.appending(path: "immich/library/library/" + rel)))
     }
 
     @Test @LwExt4 func preexistingPartialsAreNeverTouched() throws {
         let v = try Volume.openImage(Fixtures.trixie); defer { v.close() }
         let tmp = tmpDir()
-        let dir = tmp.appending(path: "admin/2026/07")
+        let dir = tmp.appending(path: "07")
         let d1 = dir.appending(path: "01"), d2 = dir.appending(path: "02")
         try FileManager.default.createDirectory(at: d1, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: d2, withIntermediateDirectories: true)
@@ -64,7 +64,7 @@ import Foundation
         for n in ["01/IMG_0001", "02/IMG_0002"] {
             #expect(sha256(dir.appending(path: n + ".heic")) == sha256(Fixtures.srcTree.appending(path: "immich/library/library/admin/2026/07/" + n + ".heic")))
         }
-        #expect(partials(in: tmp).sorted() == ["admin/2026/07/01/.IMG_0001.heic.partial", "admin/2026/07/02/.IMG_0002.heic.partial"])
+        #expect(partials(in: tmp).sorted() == ["07/01/.IMG_0001.heic.partial", "07/02/.IMG_0002.heic.partial"])
     }
 
     @Test @LwExt4 func destinationRemovedMidRunStopsWithoutRecreating() throws {

@@ -31,9 +31,4 @@ import Foundation
         try "x".write(to: dir.appending(path: "\(id.uuidString).json"), atomically: true, encoding: .utf8)
         #expect(DiskSettings.load(uuid: id, from: dir) == DiskSettings())
     }
-
-    @Test @LwExt4 func suggestsImmichLibrary() throws {
-        let v = try Volume.openImage(Fixtures.trixie); defer { v.close() }
-        #expect(suggestedImmichRoot(v) == "/immich/library/library")
-    }
 }
