@@ -11,6 +11,7 @@ import DiskArbitration
 
     private var session: DASession?
     nonisolated private static let linuxGUID = "0FC63DAF-8483-4772-8E79-3D69D8477DE4"
+    nonisolated private static let basicDataGUID = "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7"
 
     func start() {
         guard session == nil, let s = DASessionCreate(kCFAllocatorDefault) else { return }
@@ -39,7 +40,9 @@ import DiskArbitration
         let content = d[kDADiskDescriptionMediaContentKey as String] as? String ?? ""
         let whole = d[kDADiskDescriptionMediaWholeKey as String] as? Bool ?? false
         let internalDisk = d[kDADiskDescriptionDeviceInternalKey as String] as? Bool ?? true
-        let isLinux = content.uppercased() == linuxGUID || content == "Linux"
+        // ext4 sering dibuat di partisi bertipe Microsoft Basic Data (Windows/beberapa installer)
+        let isLinux = [linuxGUID, basicDataGUID].contains(content.uppercased())
+            || content == "Linux" || content == "Microsoft Basic Data"
         let isBareExternal = whole && !internalDisk && content.isEmpty
         guard (isLinux || isBareExternal) && !internalDisk else { return nil }
         let size = (d[kDADiskDescriptionMediaSizeKey as String] as? NSNumber)?.int64Value ?? 0
